@@ -63,11 +63,17 @@
             const statusEl = document.getElementById("status");
             const connectBtn = document.getElementById("connectBtn");
 
-            let tracking = false;
             let watchId = null;
+            let isSending = false;
 
             function setStatus(msg, isError = false) {
                 statusEl.innerHTML = `<p class="${isError ? "error" : ""}">${msg}</p>`;
+            }
+
+            function resetButton() {
+                connectBtn.disabled = false;
+                connectBtn.textContent = "Retry";
+                isSending = false;
             }
 
             if (!DEVICE_ID || !API_KEY || !SERVER) {
@@ -85,7 +91,8 @@
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
-                            "X-Api-Key": API_KEY,
+                            "X-Device-ID": DEVICE_ID,
+                            "X-Device-Key": API_KEY,
                         },
                         body: JSON.stringify({
                             device_id: DEVICE_ID,
@@ -96,47 +103,58 @@
                             timestamp: new Date().toISOString(),
                         }),
                     });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    setStatus(`📍 Connected – sending live location`);
+                    if (!res.ok)
+                        throw new Error(
+                            `HTTP ${res.status} – ${res.statusText}`,
+                        );
+                    setStatus("📍 Connected – sending live location");
                 } catch (err) {
-                    setStatus(`❌ Send failed: ${err.message}`, true);
+                    // Stop the infinite loading – show error and re‑enable the button
+                    setStatus(`❌ ${err.message}`, true);
+                    if (watchId) {
+                        navigator.geolocation.clearWatch(watchId);
+                        watchId = null;
+                    }
+                    resetButton();
                 }
             }
 
-            connectBtn.addEventListener("click", () => {
-                if (!navigator.geolocation) {
-                    setStatus("Geolocation not supported.", true);
-                    return;
-                }
+            function startTracking() {
+                if (isSending) return;
+                isSending = true;
                 connectBtn.disabled = true;
                 connectBtn.textContent = "Connecting…";
                 setStatus("Requesting GPS access…");
 
                 navigator.geolocation.getCurrentPosition(
                     (pos) => {
-                        // First position acquired – start tracking
                         sendTelemetry(pos);
                         watchId = navigator.geolocation.watchPosition(
                             sendTelemetry,
-                            (err) =>
-                                setStatus(`❌ GPS error: ${err.message}`, true),
+                            (err) => {
+                                setStatus(`❌ GPS error: ${err.message}`, true);
+                                resetButton();
+                            },
                             {
                                 enableHighAccuracy: true,
-                                timeout: 10000,
+                                timeout: 20000,
                                 maximumAge: 5000,
                             },
                         );
                         setStatus("📍 Connected – live location active");
-                        tracking = true;
                     },
                     (err) => {
-                        setStatus(`❌ GPS access denied: ${err.message}`, true);
-                        connectBtn.disabled = false;
-                        connectBtn.textContent = "Connect Device";
+                        setStatus(
+                            `❌ ${err.message}. Please enable GPS and try again.`,
+                            true,
+                        );
+                        resetButton();
                     },
-                    { enableHighAccuracy: true, timeout: 10000 },
+                    { enableHighAccuracy: true, timeout: 20000 },
                 );
-            });
+            }
+
+            connectBtn.addEventListener("click", startTracking);
         </script>
     </body>
 </html>
