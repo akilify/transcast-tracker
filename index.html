@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Transcast Mobile Tracker</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: #0a0f14;
+                color: #fff;
+            }
+            .container {
+                max-width: 400px;
+                margin: 0 auto;
+            }
+            h2 {
+                text-align: center;
+                color: #6f8fff;
+            }
+            .status {
+                background: #121923;
+                border-radius: 8px;
+                padding: 15px;
+                margin: 15px 0;
+            }
+            .status p {
+                margin: 5px 0;
+            }
+            .error {
+                color: #f03;
+            }
+            button {
+                width: 100%;
+                padding: 12px;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                background: #4f70f5;
+                color: #fff;
+            }
+            button:disabled {
+                background: #555;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>Transcast Mobile Tracker</h2>
+            <div class="status" id="status"><p>Ready to connect</p></div>
+            <button id="connectBtn">Connect Device</button>
+        </div>
+
+        <script>
+            const params = new URLSearchParams(window.location.search);
+            const DEVICE_ID = params.get("device_id");
+            const API_KEY = params.get("key");
+            const SERVER = params.get("server");
+
+            const statusEl = document.getElementById("status");
+            const connectBtn = document.getElementById("connectBtn");
+
+            let tracking = false;
+            let watchId = null;
+
+            function setStatus(msg, isError = false) {
+                statusEl.innerHTML = `<p class="${isError ? "error" : ""}">${msg}</p>`;
+            }
+
+            if (!DEVICE_ID || !API_KEY || !SERVER) {
+                setStatus(
+                    "Missing device credentials. Please scan the QR code again.",
+                    true,
+                );
+                connectBtn.disabled = true;
+            }
+
+            async function sendTelemetry(position) {
+                const { latitude, longitude, speed, heading } = position.coords;
+                try {
+                    const res = await fetch(`${SERVER}/api/v1/telemetry`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-Api-Key": API_KEY,
+                        },
+                        body: JSON.stringify({
+                            device_id: DEVICE_ID,
+                            latitude,
+                            longitude,
+                            speed: speed || 0,
+                            heading: heading || 0,
+                            timestamp: new Date().toISOString(),
+                        }),
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    setStatus(`📍 Connected – sending live location`);
+                } catch (err) {
+                    setStatus(`❌ Send failed: ${err.message}`, true);
+                }
+            }
+
+            connectBtn.addEventListener("click", () => {
+                if (!navigator.geolocation) {
+                    setStatus("Geolocation not supported.", true);
+                    return;
+                }
+                connectBtn.disabled = true;
+                connectBtn.textContent = "Connecting…";
+                setStatus("Requesting GPS access…");
+
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        // First position acquired – start tracking
+                        sendTelemetry(pos);
+                        watchId = navigator.geolocation.watchPosition(
+                            sendTelemetry,
+                            (err) =>
+                                setStatus(`❌ GPS error: ${err.message}`, true),
+                            {
+                                enableHighAccuracy: true,
+                                timeout: 10000,
+                                maximumAge: 5000,
+                            },
+                        );
+                        setStatus("📍 Connected – live location active");
+                        tracking = true;
+                    },
+                    (err) => {
+                        setStatus(`❌ GPS access denied: ${err.message}`, true);
+                        connectBtn.disabled = false;
+                        connectBtn.textContent = "Connect Device";
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 },
+                );
+            });
+        </script>
+    </body>
+</html>
