@@ -40,7 +40,6 @@
 
     <button id="connectBtn">Connect Device</button>
 </div>
-
 <script>
     const params = new URLSearchParams(window.location.search);
     const DEVICE_ID = params.get("device_id");
@@ -54,6 +53,8 @@
 
     let watchId = null;
     let isSending = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
 
     function setStatus(msg, isError = false) {
         statusEl.innerHTML = `<p class="${isError ? 'error' : ''}">${msg}</p>`;
@@ -64,6 +65,7 @@
         connectBtn.textContent = "Retry GPS";
         isSending = false;
         manualSendBtn.disabled = false;
+        retryCount = 0;
     }
 
     if (!DEVICE_ID || !API_KEY || !SERVER) {
@@ -92,9 +94,22 @@
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             setStatus("📍 Connected – sending live location");
+            retryCount = 0;  // reset on success
         } catch (err) {
-            setStatus(`❌ Send failed: ${err.message}`, true);
-            resetButton();
+            retryCount++;
+            if (retryCount <= MAX_RETRIES) {
+                setStatus(`⚠️ Network issue, retrying (${retryCount}/${MAX_RETRIES})…`);
+                // retry after 3 seconds
+                await new Promise(r => setTimeout(r, 3000));
+                return sendTelemetry(lat, lon, speed, heading);
+            } else {
+                setStatus("❌ Lost connection. Please check your internet and try again.", true);
+                resetButton();
+                if (watchId) {
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                }
+            }
         }
     }
 
@@ -120,7 +135,6 @@
 
         navigator.geolocation.getCurrentPosition(
             (pos) => {
-                // GPS success
                 sendTelemetry(pos.coords.latitude, pos.coords.longitude, pos.coords.speed || 0, pos.coords.heading || 0);
                 watchId = navigator.geolocation.watchPosition(
                     (position) => {
@@ -154,7 +168,6 @@
         );
     }
 
-    // Manual coordinate input
     manualSendBtn.addEventListener("click", () => {
         const coords = manualInput.value.trim().split(",");
         if (coords.length === 2) {
@@ -174,4 +187,74 @@
     connectBtn.addEventListener("click", startTracking);
 </script>
 </body>
+</html>
+               (err) => {
+                                setStatus(`❌ GPS error: ${err.message}`, true);
+                                resetButton();
+                            },
+                            {
+                                enableHighAccuracy: true,
+                                timeout: 45000,
+                                maximumAge: 5000,
+                            },
+                        );
+                        setStatus("📍 Connected – live location active");
+                    },
+                    async (err) => {
+                        if (err.code === 3) {
+                            // timeout – try fallback
+                            setStatus(
+                                "GPS timed out, trying approximate location…",
+                            );
+                            const fallback = await getFallbackLocation();
+                            if (fallback) {
+                                await sendTelemetry(
+                                    fallback.lat,
+                                    fallback.lon,
+                                    0,
+                                    0,
+                                );
+                                setStatus(
+                                    "📍 Connected using approximate location. Accuracy may be low.",
+                                );
+                            } else {
+                                setStatus(
+                                    "❌ GPS failed and approximate location unavailable. Please enter coordinates manually or retry.",
+                                    true,
+                                );
+                            }
+                        } else {
+                            setStatus(
+                                `❌ ${err.message}. Please enable GPS and try again.`,
+                                true,
+                            );
+                        }
+                        resetButton();
+                    },
+                    { enableHighAccuracy: true, timeout: 45000 },
+                );
+            }
+
+            manualSendBtn.addEventListener("click", () => {
+                const coords = manualInput.value.trim().split(",");
+                if (coords.length === 2) {
+                    const lat = parseFloat(coords[0]);
+                    const lon = parseFloat(coords[1]);
+                    if (!isNaN(lat) && !isNaN(lon)) {
+                        sendTelemetry(lat, lon);
+                        setStatus("📍 Sent manual coordinates");
+                    } else {
+                        setStatus(
+                            "Invalid coordinates. Use format: lat,lon",
+                            true,
+                        );
+                    }
+                } else {
+                    setStatus("Enter coordinates as: lat,lon", true);
+                }
+            });
+
+            connectBtn.addEventListener("click", startTracking);
+        </script>
+    </body>
 </html>
